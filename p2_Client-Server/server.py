@@ -21,16 +21,11 @@ server.fisica.open()
 server.fisica.flush()
 server.threadStart()
 
-# Inicia o looping procurando o buffer:
-from data import b_img
-print(f"Aguardando info de {len(b_img)} bytes")
-received = server.getNData(len(b_img))
+# Inicia o looping esperando mensagem com o comando de leitura:
+reader = server.checkBuffer()
 
 print(f"\033[32m" + "Comunicação efetuada com sucesso!" + "\033[m")
-print(received)
-
-
-
+print(reader)
 
 #! Encerra o server
 server.threadKill()

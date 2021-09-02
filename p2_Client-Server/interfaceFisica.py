@@ -12,6 +12,10 @@ import serial
 # importa pacote para conversão binário ascii
 import binascii
 
+#! start / end ORDER
+START_ORDER = b'\xff\xff\xff\x00\x00\x00'
+END_ORDER = b'\x00\x00\x00\xff\xff\xff'
+
 #################################
 # Interface com a camada física #
 #################################
