@@ -22,10 +22,10 @@ server.fisica.flush()
 server.threadStart()
 
 # Inicia o looping esperando mensagem com o comando de leitura:
-reader = server.checkBuffer()
+readed, orders = server.checkBuffer()
 
-print(f"\033[32m" + "Comunicação efetuada com sucesso!" + "\033[m")
-print(reader)
+print(f"\033[32m" + "Comunicação efetuada com sucesso!" + "\033[m" + "\n")
+print(f"\033[34m" + f" - Pacote recebido ({(len(orders))} comandos):\n{readed}" + "\033[33m" +  f"\n\n - Ordens identificadas: \n{orders}" + "\033[m")
 
 #! Encerra o server
 server.threadKill()
