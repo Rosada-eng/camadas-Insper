@@ -112,14 +112,6 @@ class RX(object):
             self.clearBuffer()
             return b""
 
-    # def getNData(self, size):
-    #     print("Reading order received!")
-        
-    #     while(self.getBufferLen() < 6 + 2 + size +6): #! EDIT: adiciona comandos de start/stop
-    #         print(f" searching ... {self.getBufferLen()} of {size + 14}")
-    #         time.sleep(0.05)                 
-    #     return(self.getBuffer(size))
-
     def getData(self, payload_size, seq_size_of_orders):
         self.threadPause()
         payload = self.buffer[self.HeaderLen : self.HeaderLen + payload_size]

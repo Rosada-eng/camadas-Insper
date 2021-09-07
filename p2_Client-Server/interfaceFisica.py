@@ -19,7 +19,7 @@ END_ORDER = b'\x00\x00\x00\xff\xff\xff'
 #################################
 # Interface com a camada física #
 #################################
-class fisica(object):
+class Fisica(object):
     def __init__(self, name):
         self.name        = name
         self.port        = None
