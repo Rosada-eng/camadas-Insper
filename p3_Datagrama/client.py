@@ -19,92 +19,123 @@ import numpy as np
 import time
 import random
 from enlaceTx import TX
-from interfaceFisica import Fisica, EOP
+from enlaceRx import RX
+from interfaceFisica import Fisica
 
 serialName = "COM4"
 
-def run_client():
-    try: 
-        # instancia física:
-        fisica = Fisica(serialName)
-        # cria TX do cliente
-        client = TX(fisica)
+class Client:
+    def __init__(self, serialName, file_route, server_id, client_id=0,):
+        self.id         = client_id
+        self.server_id  = server_id
+        # unidades para guardar comunicação:
+        self.packages_to_send = []              # armazena a informação dividida em pacotes
+        self.payload_size = 114
+        self.last_package = 0
+        self.total_packages_to_send = None
 
-        # Abre a porta e limpa a memória
-        client.fisica.open()
-        client.threadStart()
-        client.fisica.flush()
+        # parâmetros para guardar rota e o arquivo transformado em bytes
+        self.route = file_route
+        self.file  = b''
+       
+        # cria porta RX e TX do client
+        self.rx = RX(Fisica(serialName))
+        self.tx = TX(Fisica(serialName))
 
+        # dicionário de propriedades da transmissão:
+        self.props = {
+            'tipo_mensagem':    0,
+            'id_sensor':        0,
+            'id_servidor':      0,
+            'total_pacotes':    0,
+            'pacote_atual':     0,
+            'tamanho_conteudo': 0,
+            'recomecar':        0,
+            'ultimo_recebido':  0,
+            'CRC_1':            0,
+            'CRC_2':            0
+        }
+
+    def start_client(self):
+        # Abre as portas e limpa as memórias
+        self.rx.fisica.open()
+        self.rx.fisica.flush()
+        self.rx.threadStart()
+
+        self.tx.fisica.open()
+        self.tx.fisica.flush()
+        self.tx.threadStart()
+
+        self.open_communication()
+
+    def read_file_as_bytes(self, filename):
+        print(f"Lendo arquivo de: {filename}")
+        with open(filename,  "rb") as f:
+            file = f.read()
+        return file
+
+    def create_packages_to_transmit(self):
+        """ 
+            Cria todos os pacotes a serem enviados para o servidor, 
+            contendo o tamanho correto para cada payload e seguindo 
+            o protocolo adotado.
+            Armazena a lista no atributo `packages_to_send`
         """
-            #$ STRATEGY:
-            -- Enviar no início uma sequência específica de bytes informando o #@ início da transmissão
-            -- Logo em seguida: enviar o tamanho em bytes da mensagem (2 unidades)
-            -- Depois: enviar o número de comandos
-            -- Depois: enviar uma sequência de "1" e "2" informando o tamanho de cada comando
-            -- Fim: #@ byte de fim da transmissão 
-            -- Checar se a mensagem recebida tem os tamanhos informado
-        """
+        try: 
+            self.file = self.read_file_as_bytes(self.route)
+            # Calcula número de pacotes necessários para enviar toda a mensagem
+            import math
+            self.total_packages_to_send = math.ceil(len(self.file) / self.payload_size)
+            # Divide a mensagem no número de pacotes necessários
+            for i in range(0, self.total_packages_to_send):
+                content = (self.file[i*self.payload_size: (i+1)*self.payload_size])
 
-        commands_list = [b'\x00\xff', b'\x00', b'\x0f', b'\xf0', b'\xff\x00', b'\xff']
+                # Constrói o package de cada parcela da mensagem
+                temporary_props = {
+                    'tipo_mensagem':    3,                              # mensagem do tipo DADOS
+                    'id_sensor':        self.id,     
+                    'id_servidor':      self.server_id,
+                    'total_pacotes':    self.total_packages_to_send,
+                    'pacote_atual':     i,
+                    'tamanho_conteudo': len(content),                   # tamanho do payload
+                    'recomecar':        0 if i == 0 else i-1,
+                    'ultimo_recebido':  0 if i == 0 else i-1,
+                    'CRC_1':            0,
+                    'CRC_2':            0
+                }
 
-        # Número de comandos enviados:
-        N_commands = random.randint(10, 30)
+                package = self.tx.build_header(temporary_props) + content + self.tx.build_EOP()
+                self.packages_to_send.append(package)
 
-        # sequência de comandos a ser transmitida
-        payload = random.choices(commands_list, k=N_commands)
-        size_of_commands = [len(command) for command in payload]
+            return True
 
-        # Número de bytes presente na sequência de comandos
-        n_bytes = "".join([str(x) for x in payload]).count("\\")
-        """
-        message = #! START_ORDER (6 bytes) >>
-                #% nº de bytes no Payload (2 bytes) >>
-                #% N = nº de comandos (1 byte) >> 
-                #% [seq. de 1's e 2's informando tamanho de cada ordem] (13 bytes) >>
-                
-                __mensagem__ >>
-                #! END_ORDER (6 bytes)
-        """
-        """
-            #% STRATEGY p/ Sequência:
-                => Escrever uma string com uma sequência de 1's e 2's
-                    ex.: '12211122122121121212'  (20 dig)
-                => converter para um inteiro e, em seguida, para bytes para ser enviada
-                --> Para uma sequência de 30 2's, são necessários 13 bytes. 
-                => Ao ler o conjunto de bytes, refazer o processo inverso
-                => Ler número por número da string e separar os comandos conforme o tamanho dele (1 ou 2).
-        """
+        except:
+            print(" Erro na conversão do arquivo. Confira o caminho e o tamanho do arquivo")
+            return False
+         
 
-        message = ( START_ORDER
-                    + (n_bytes).to_bytes(2, byteorder='little')
-                    + (N_commands).to_bytes(1, byteorder='little')
-                    + int("".join([str(size) for size in size_of_commands])).to_bytes(13, "little")
-                    
-                    )
-
-        for command in payload:
-            message += command
-
-        message += END_ORDER
-
-        print("-- Preparando para enviar Dados -- ")
-        print("\033[33m" + f"{N_commands} comandos |  | tamanho total da mensagem com protocolo: {len(message)}\n {message}" + "\033[m")
-
-        client.sendBuffer(message)
-        print("=> Dados enviados.")
-
-        time.sleep(0.5)
-        txStatus = client.getStatus()
-        print("status:", txStatus)
-
-
-        #! Encerra o client
-        client.threadKill()
-        fisica.close()
-
-    except Exception as erro:
-        print("Não foi possível iniciar a comunicação do client")
-        print(erro)
+    def open_communication(self):
+        """ Tenta estabelecer comunicação com o servidor. """
+        return 
+        
+    def clear_props(self, fields=[]):
+        # Limpa apenas os campos especificados
+        if fields:
+            for prop in self.props:
+                if prop in fields:
+                    self.props[prop] = 0
+        else:
+            for prop in self.props:
+                self.props[prop] = 0
+        
+    
+    def stop_client(self):
+        """ Encerra o client """
+        self.rx.threadKill()
+        self.rx.fisica.close()
 
 if __name__ == "__main__":
-    run_client()
+    client = Client(serialName)
+    client.start_client()
+    client.stop_client()
+    print("Comunicação encerrada!")

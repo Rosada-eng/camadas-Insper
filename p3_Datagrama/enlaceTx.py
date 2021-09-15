@@ -61,16 +61,16 @@ class TX(object):
         return(self.threadMutex)
 
     def build_header(self, props:dict):
-        h0 = int_to_bytes(props[0])     # tipo de Mensagem
-        h1 = b'\x00'                    # id do Sensor
-        h2 = b'\x00'                    # id do Servidor
-        h3 = int_to_bytes(props[3])     # Número Total de Pacotes
-        h4 = int_to_bytes(props[4])     # Número do Pacote Atual
-        h5 = int_to_bytes(props[5])     # id do arquivo / tamanho do payload
-        h6 = int_to_bytes(props[6])     # Pacote p/ recomeçar, caso tenha Erro
-        h7 = int_to_bytes(props[7])     # último pacote recebido com sucesso
-        h8 = b'\x00'                    # CRC
-        h9 = b'\x00'                    # CRC
+        h0 = int_to_bytes(props['tipo_mensagem'])       # tipo de Mensagem
+        h1 = b'\x00'                                    # id do Sensor
+        h2 = b'\x00'                                    # id do Servidor
+        h3 = int_to_bytes(props['total_pacotes'])       # Número Total de Pacotes
+        h4 = int_to_bytes(props['pacote_atual'])        # Número do Pacote Atual
+        h5 = int_to_bytes(props['tamanho_conteudo'])    # id do arquivo / tamanho do payload
+        h6 = int_to_bytes(props['recomecar'])           # Pacote p/ recomeçar, caso tenha Erro
+        h7 = int_to_bytes(props['ultimo_recebido'])     # último pacote recebido com sucesso
+        h8 = b'\x00'                                    # CRC
+        h9 = b'\x00'                                    # CRC
 
         header = h0 + h1 + h2 + h3 + h4 + h5 + h6 + h7 + h8 + h9
         return header

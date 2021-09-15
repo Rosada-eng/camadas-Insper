@@ -1,7 +1,7 @@
 #
 """ 
     Funcionamento: 
-        1- O Server será inicializado e ficara ouvindo até detectar um pedido de transmissão
+        1- O Server será inicializado e ficará ouvindo até detectar um pedido de transmissão
         2- O Server responderá se está #$ disponível ou ocupado
         3- Caso esteja disponível --> iniciará-se a comunicação
         4- Recebe pacote por pacote e faz uma série de checagens:
@@ -24,9 +24,9 @@ serialName = "COM3"
 class Server:
     def __init__(self, serialName):
         # unidades para guardar comunicação:
-        self.packages = []
+        self.packages_received = []              # armazena os pacotes recebidos até o momento
         self.last_package = 0
-        self.total_packages = None
+        self.total_packages_received = None
         self.busy = False
        
         # cria porta RX e TX do servidor
@@ -40,7 +40,7 @@ class Server:
             'id_servidor':      0,
             'total_pacotes':    0,
             'pacote_atual':     0,
-            'conteudo':         0,
+            'tamanho_conteudo': 0,
             'recomecar':        0,
             'ultimo_recebido':  0,
             'CRC_1':            0,
@@ -151,12 +151,20 @@ class Server:
 
         return 
     def receive_messages(self):
-        self.busy = True
         #! LOOPING P/ RECEBER TODOS OS PACOTES DA TRANSMISSÃO
+        """
+            Ao receber um pacote, altera o status para busy.
+            1- Checa a estrutura de cada pacote. Se condizer com as condições, recebe os dados e agrupa 
+            2- Ao finalizar, altera status de busy para False e aguarda o proximo pacote.
+        """
         # Checa o tipo e direciona para ação
         # envia mensagem de status
         return
 
+    def send_next_package(self):
+        """ 
+            Constrói a mensagem para receber o próximo pacote
+        """
     def package_feedback(self, cond1, cond2):
         return
 

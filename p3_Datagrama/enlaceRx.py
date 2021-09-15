@@ -13,9 +13,6 @@ import time
 # Threads
 import threading
 
-#! START/END ORDER
-from interfaceFisica import START_ORDER, END_ORDER
-
 # Class
 class RX(object):
   

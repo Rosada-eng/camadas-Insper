@@ -17,7 +17,7 @@ def bytes_to_int(bytes):
     """ Converte o número em bytes para inteiro"""
     return int.from_bytes(bytes, byteorder='little')
 
-def int_to_bytes(numbers, bytes_size):
+def int_to_bytes(numbers, bytes_size=1):
     """ Converte o número inteiro para bytes no tamanho especificado"""
     return numbers.to_bytes(bytes_size, byteorder='little')
 
