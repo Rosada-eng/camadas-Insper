@@ -22,18 +22,21 @@ import time
 serialName = "COM3"
 
 class Server:
-    def __init__(self, serialName):
-        # unidades para guardar comunicação:
-        self.packages_received = []              # armazena os pacotes recebidos até o momento
-        self.last_package = 0
-        self.total_packages_received = None
-        self.busy = False
+    def __init__(self, serialName, server_id):
+        self.id                         = server_id
+        self.client_id                  = None
+        self.file_id                    = None
+
+        self.payloads_received          = []              # armazena os pacotes recebidos até o momento
+        self.last_package               = 0
+        self.total_packages_to_receive  = 0
+        self.busy                       = False
        
         # cria porta RX e TX do servidor
         self.rx = RX(Fisica(serialName))
         self.tx = TX(Fisica(serialName))
 
-        # dicionário de propriedades da transmissão:
+        # dicionário de propriedades (p/ ENVIAR) da transmissão:
         self.props = {
             'tipo_mensagem':    0,
             'id_sensor':        0,
@@ -65,13 +68,13 @@ class Server:
         self.tx.fisica.flush()
         self.tx.threadStart()
 
+        self.busy = False
         self.await_message()
     
     def await_message(self):
         """ 
-        Coloca o server em status disponível, aguardando recebimento da mensagem
+        Coloca o server em espera, aguardando recebimento da mensagem
         """
-        self.busy = False
         while(self.rx.getBufferLen() <= self.rx.fisica.HeaderLen + self.rx.fisica.EOPLen):
             if self.last_package == 0:
                 print(" [ECHO] awaiting for client to connect...")
@@ -79,10 +82,6 @@ class Server:
                 print(" waiting for the next package...")
             time.sleep(0.05)
         
-        #-- checa tipo da mensagem:
-            # se de INÍCIO: --> inicia looping de transmissão
-            # se de TRANSMISSÃO --> faz checkagens no HEAD e vê se está tudo ok
-            #                   se tudo OK: --> Faz recebimento da mensagem.
         self.check_package_type()
 
     def check_package_type(self):
@@ -107,66 +106,124 @@ class Server:
             h9 - CRC
         Checar tipo de mensagem: ECHO / DATA / INFO
 
-        #*--tipo da mensagem:
             # se de INÍCIO: --> inicia looping de transmissão de pacotes
             # se de DADOS --> faz checkagens no HEAD e vê se está tudo ok
             #                   se tudo OK: --> Faz recebimento da mensagem.
         """
-        
-        # reseta o props[tipo_mensagem] p/ evitar interferência da msg anterior
-        self.props['tipo_mensagem'] = 0 
+        buffer = self.rx.getAllBuffer()
+        header = self.convert_header_to_list(buffer[:self.rx.fisica.HeaderLen])
 
-        header = self.rx.getAllBuffer()[:10]
-        self.props['tipo_mensagem'] = bytes_to_int(header[0])
+        # checa se mensagem é destinada ao Servidor correto
+        if header[2] == self.id: 
+            #* mensagem do tipo 1 (ECHO)
+            if header[0] == 1:
+                print(" Client detected -- Valid communication. ")
 
-        if self.props['tipo_mensagem'] == 1:
-            print(" Client detected")
-            
-            # Envia resposta que está pronto, se não estiver ocupado
-            self.props['tipo_mensagem'] = 2 if self.busy==False else 0
-            self.tx.send_datagram(self.props)
+                #* Guarda informações pertinentes à comunicação
+                self.client_id                  = header[1]
+                self.file_id                    = header[5]
+                self.total_packages_to_receive  = header[3]
+                
+                # Envia resposta que está pronto, se não estiver ocupado
+                self.props['tipo_mensagem']  = 2 if self.busy==False else 0
+                self.props['id_sensor']      = self.client_id
+                self.props['id_servidor']    = self.id
+                
+                message = self.tx.build_header(self.props) + self.tx.build_EOP()
+                self.tx.sendBuffer(message)
 
-            # PREPARA PARA RECEBER CONTEÚDO:
-            self.receive_messages()
+                # Inicia Looping para receber todo conteúdo:
+                self.manage_receiving()
 
-            return "ECHO"
+            #* mensagem do tipo 3 (DADOS)
+            elif header[0] == 3:
+                # checa se veio do sensor correto:
+                if header[1] == self.client_id:
+                    # checa último pacote recebido e pacote atual
+                    if header[7] == self.last_package and header[4] == self.last_package + 1:
+                        payload = self.extract_payload(header[5])
+                        if payload:
+                            self.payloads_received.append(payload)
 
-        # mensagem de transferência
-        elif self.props['tipo_mensagem'] == 3:
-            # Chamar função que checa Head, tamanho do payload e devolve a ação necessária
-            self.check_package_structure()
-            
-            print (f" Data received -- Package: #{bytes_to_int(header[4])} | Payload size: {bytes_to_int(header[5])} ")
+                            self.ask_for_next_package()
+                        else:
+                            self.ask_to_repeat()
 
-            return "DATA"
+
+                else:
+                    print(" This package came from another client. Please, start communication again")
+                    raise Exception
+                
 
         else:
-            return ""  
+            print(" Wrong server. Please, try again later")
+            raise Exception
 
-    def check_package_structure(self):
+    def extract_payload(self, size):
+        full_size = self.tx.fisica.HeaderLen + self.tx.fisica.EOPLen + size
+        while self.rx.getBufferLen() <= full_size:
+            print(" waiting for buffer to complete...")
+            time.sleep(0.05)
+
+        buffer = self.rx.getBuffer(full_size)
+        payload = buffer[self.tx.fisica.HeaderLen : self.tx.fisica.HeaderLen + size]
+
+        check_EOP = self.check_EOP(buffer[-self.tx.fisica.EOPLen : ])
+        if check_EOP:
+            return payload
+        else:
+            return False
+
+    def check_EOP(self, EOP):
+        if EOP == self.tx.fisica.EOP:
+            return True
+        else:
+            return False
+            
+    def check_package_structure(self, buffer):
         """
-        Checa a estrutura do Payload, contrastando com as info's do Head.
+        Checa a estrutura do Package, contrastando `self.props` com as info's do Head.
         Se estiver tudo ok, recebe a mensagem, pede a próxima e aguarda recebimento da próxima.
         """
-
         return 
-    def receive_messages(self):
-        #! LOOPING P/ RECEBER TODOS OS PACOTES DA TRANSMISSÃO
+    
+    def manage_receiving(self):
         """
-            Ao receber um pacote, altera o status para busy.
             1- Checa a estrutura de cada pacote. Se condizer com as condições, recebe os dados e agrupa 
-            2- Ao finalizar, altera status de busy para False e aguarda o proximo pacote.
+            2- Solicitar o envio de um novo pacote ao client e aguardar recebimento
         """
-        # Checa o tipo e direciona para ação
-        # envia mensagem de status
-        return
 
-    def send_next_package(self):
+        self.busy = True
+        try: 
+            #! LOOPING P/ RECEBER TODOS OS PACOTES DA TRANSMISSÃO
+            while self.last_package < self.total_packages_to_receive:
+                self.await_message()
+            
+        except:
+            return
+
+    def ask_for_next_package(self):
         """ 
-            Constrói a mensagem para receber o próximo pacote
+            Envia a mensagem para receber o próximo pacote.
+            Atualiza o último recebido e por qual pacote recomecar em caso de erro.
         """
-    def package_feedback(self, cond1, cond2):
+        self.last_package += 1              # Controla o looping principal
+        
+        # Props para comunicação
+        self.props['recomecar'] += 1
+        self.props['ultimo_recebido'] += 1
+        self.props['tipo_mensagem'] = 4
+
+        message = self.tx.build_header(self.props) + self.tx.build_EOP()
+        
+        self.tx.sendBuffer(message)
+        #! FECHA CICLO DO LOOPING PRINCIPAL
+
+    def ask_to_repeat(self):
+        # Definir para Projeto 4
         return
+        #! FECHA CICLO DO LOOPING PRINCIPAL
+
 
     def clear_props(self, fields=[]):
         # Limpa apenas os campos especificados
@@ -178,11 +235,15 @@ class Server:
             for prop in self.props:
                 self.props[prop] = 0
         
+    def convert_header_to_list(self, header):
+        return [bytes_to_int(byte) for byte in header]
     
     def stop_server(self):
         """ Encerra o server """
         self.rx.threadKill()
+        self.tx.threadKill()
         self.rx.fisica.close()
+        self.tx.fisica.close()
 
 if __name__ == "__main__":
     server = Server(serialName)
