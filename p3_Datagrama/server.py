@@ -16,7 +16,7 @@
 
 from enlaceRx import RX
 from enlaceTx import TX
-from interfaceFisica import Fisica, int_to_bytes, bytes_to_int
+from interfaceFisica import Fisica, bytes_to_int
 import time
 
 serialName = "COM4"
@@ -28,14 +28,14 @@ class Server:
         self.file_id                    = None
 
         self.payloads_received          = []              # armazena os pacotes recebidos até o momento
-        self.last_package               = 0
+        self.current_package            = 0
         self.total_packages_to_receive  = 0
         self.busy                       = False
        
         # cria porta RX e TX do servidor
-        fisica = Fisica(serialName)
-        self.rx = RX(fisica)
-        self.tx = TX(fisica)
+        self.fisica = Fisica(serialName)
+        self.rx = RX(self.fisica)
+        self.tx = TX(self.fisica)
 
         # dicionário de propriedades (p/ ENVIAR) da transmissão:
         self.props = {
@@ -53,11 +53,12 @@ class Server:
 
     def start_server(self):
         # Abre as portas e limpa as memórias
-        self.rx.fisica.open()
+        self.fisica.open()
+        self.fisica.flush()
+
         self.rx.fisica.flush()
         self.rx.threadStart()
 
-        self.tx.fisica.open()
         self.tx.fisica.flush()
         self.tx.threadStart()
 
@@ -68,12 +69,12 @@ class Server:
         """ 
         Coloca o server em espera, aguardando recebimento da mensagem
         """
-        while(self.rx.getBufferLen() <= self.rx.fisica.HeaderLen + self.rx.fisica.EOPLen):
-            if self.last_package == 0:
-                print(" [ECHO] awaiting for client to connect...")
+        while(self.rx.getBufferLen() < self.rx.fisica.HeaderLen + self.rx.fisica.EOPLen):
+            if self.current_package == 0 and not self.busy:
+                print(f"[ECHO] awaiting for client to connect ({self.rx.getBufferLen()})...")
             else:
-                print(" waiting for the next package...")
-            time.sleep(0.05)
+                print(f" waiting for the package #{self.current_package}...")
+            time.sleep(0.1)
         
         self.check_package_type()
 
@@ -103,64 +104,64 @@ class Server:
             # se de DADOS --> faz checkagens no HEAD e vê se está tudo ok
             #                   se tudo OK: --> Faz recebimento da mensagem.
         """
+
         buffer = self.rx.getAllBuffer()
         header = self.convert_header_to_list(buffer[:self.rx.fisica.HeaderLen])
+        if buffer:
+            # checa se mensagem é destinada ao Servidor correto
+            if header[2] == self.id: 
+                #* mensagem do tipo 1 (ECHO)
+                if header[0] == 1:
+                    print(" Client detected -- Valid communication. ")
+                    self.clear_props()
 
-        # checa se mensagem é destinada ao Servidor correto
-        if header[2] == self.id: 
-            #* mensagem do tipo 1 (ECHO)
-            if header[0] == 1:
-                print(" Client detected -- Valid communication. ")
-                self.clear_props()
+                    #* Guarda informações pertinentes à comunicação
+                    self.client_id                  = header[1]
+                    self.file_id                    = header[5]
+                    self.total_packages_to_receive  = header[3]
+                    
+                    # Envia resposta se está disponível ou não
+                    self.props['tipo_mensagem']  = 2 if self.busy==False else 0
+                    self.props['id_sensor']      = self.client_id
+                    self.props['id_servidor']    = self.id
+                    self.props['total_pacotes']  = self.total_packages_to_receive
 
-                #* Guarda informações pertinentes à comunicação
-                self.client_id                  = header[1]
-                self.file_id                    = header[5]
-                self.total_packages_to_receive  = header[3]
+                    message = self.tx.build_header(self.props) + self.tx.build_EOP()
+                    self.tx.sendBuffer(message)
+
+                    # Inicia Looping para receber todo conteúdo, se estiver disponível:
+                    if self.props['tipo_mensagem'] == 2:
+                        self.manage_receiving()       
+
                 
-                # Envia resposta se está disponível ou não
-                self.props['tipo_mensagem']  = 2 if self.busy==False else 0
-                self.props['id_sensor']      = self.client_id
-                self.props['id_servidor']    = self.id
-                self.props['total_pacotes']  = self.total_packages_to_receive
+                #* mensagem do tipo 3 (DADOS)
+                elif header[0] == 3:
+                    # checa se veio do sensor correto:
+                    if header[1] == self.client_id:
+                        # checa último pacote recebido h(7) e pacote atual h(4)
+                        print(f" ultimo recebido: {header[7]} -- atual: {header[4]}")
+                        if (header[7] == self.current_package -1 or header[7] == 0) and (header[4] == self.current_package or header[4] == 0):
+                            if len(buffer) < self.rx.fisica.HeaderLen + self.rx.fisica.EOPLen + header[5]:
+                                time.sleep(0.2)
+                            
+                            payload = self.extract_payload(buffer, header[5])
 
-                message = self.tx.build_header(self.props) + self.tx.build_EOP()
-                self.tx.sendBuffer(message)
-
-                # Inicia Looping para receber todo conteúdo, se estiver disponível:
-                if self.props['tipo_mensagem'] == 2:
-                    self.manage_receiving()       
-
-            #* mensagem do tipo 3 (DADOS)
-            elif header[0] == 3:
-                # checa se veio do sensor correto:
-                if header[1] == self.client_id:
-                    # checa último pacote recebido h(7) e pacote atual h(4)
-                    if header[7] == self.last_package and header[4] == self.last_package + 1:
-                        payload = self.extract_payload(header[5])
-                        if payload:
-                            self.payloads_received.append(payload)
-
-                            self.ask_for_next_package()
-                        else:
-                            self.ask_to_repeat()
+                            if payload:
+                                self.payloads_received.append(payload)
+                                self.ask_for_next_package()
+                            else:
+                                self.ask_to_repeat()
 
 
-                else:
-                    print(" This package came from another client. Please, start communication again")
-                    raise Exception
-            
-        else:
-            print(" Wrong server. Please, try again later")
-            raise Exception
+                    else:
+                        print(" This package came from another client. Please, start communication again")
+                        raise Exception
+                
+            else:
+                print(" Wrong server. Please, try again later")
+                raise Exception
 
-    def extract_payload(self, size):
-        full_size = self.tx.fisica.HeaderLen + self.tx.fisica.EOPLen + size
-        while self.rx.getBufferLen() <= full_size:
-            print(" waiting for buffer to complete...")
-            time.sleep(0.05)
-
-        buffer = self.rx.getBuffer(full_size)
+    def extract_payload(self, buffer, size):
         payload = buffer[self.tx.fisica.HeaderLen : self.tx.fisica.HeaderLen + size]
 
         check_EOP = self.check_EOP(buffer[-self.tx.fisica.EOPLen : ])
@@ -174,14 +175,7 @@ class Server:
             return True
         else:
             return False
-            
-    def check_package_structure(self, buffer):
-        """
-        Checa a estrutura do Package, contrastando `self.props` com as info's do Head.
-        Se estiver tudo ok, recebe a mensagem, pede a próxima e aguarda recebimento da próxima.
-        """
-        return 
-    
+               
     def manage_receiving(self):
         """
             1- Checa a estrutura de cada pacote. Se condizer com as condições, recebe os dados e agrupa 
@@ -191,7 +185,7 @@ class Server:
         self.busy = True
         try: 
             #! LOOPING P/ RECEBER TODOS OS PACOTES DA TRANSMISSÃO
-            while self.last_package < self.total_packages_to_receive:
+            while self.current_package < self.total_packages_to_receive:
                 self.await_message()
             
             #! ENDLOOP:
@@ -212,7 +206,12 @@ class Server:
             Envia a mensagem para RECEBER o próximo pacote.
             Atualiza o último recebido e por qual pacote recomecar em caso de erro.
         """
-        self.last_package += 1              # Controla o looping principal
+        print(f" package #{self.current_package} of #{self.total_packages_to_receive -1} received successfully ")
+        # Esvazia o buffer antigo antes de receber o próximo
+        self.rx.buffer = b""
+        self.tx.buffer = b""
+
+        self.current_package += 1              # Controla o looping principal
         
         # Props para comunicação
         self.props['ultimo_recebido'] += 1
@@ -221,22 +220,26 @@ class Server:
         self.props['tipo_mensagem'] = 4     # Mensagem de 'pacote recebido com sucesso'
 
         message = self.tx.build_header(self.props) + self.tx.build_EOP()
+        # print(self.props)
         self.tx.sendBuffer(message)
-
-        print(f" package #{self.last_package} of #{self.total_packages_to_receive} receveid successfully ")
         #! FECHA CICLO DO LOOPING PRINCIPAL
 
     def ask_to_repeat(self):
         """ 
             Envia a mensagem para REPETIR o último pacote.
         """
+        # Esvazia o buffer antigo antes de receber o próximo
+        self.rx.buffer = b""
+        self.tx.buffer = b""
+
         self.props['tipo_mensagem'] = 6     # Mensagem de 'erro no último pacote recebido'
-        self.props['recomecar'] = self.last_package + 1
+        self.props['recomecar'] = self.current_package
        
         message = self.tx.build_header(self.props) + self.tx.build_EOP()
+        # print(self.props)
         self.tx.sendBuffer(message)
 
-        print(f" Failed to receive package #{self.last_package}. Please, send again. ")
+        print(f" Failed to receive package #{self.current_package}. Please, send again. ")
         return
         #! FECHA CICLO DO LOOPING PRINCIPAL
     #AUX:
@@ -251,7 +254,7 @@ class Server:
                 self.props[prop] = 0
         
     def convert_header_to_list(self, header):
-        return [bytes_to_int(byte) for byte in header]
+        return [byte for byte in header]
     
     def save_to_file(self, filename, bytes):
         with open(filename, "wb") as output:

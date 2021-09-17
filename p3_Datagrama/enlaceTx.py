@@ -77,10 +77,5 @@ class TX(object):
         return header
 
     def build_EOP(self):
-        EOP = b'\xff\xaa\xff\xaa'
+        EOP = self.fisica.EOP
         return EOP
-
-    def send_datagram(self, props:dict, payload=b''):
-        datagram = self.build_header(props) + payload + self.build_EOP()
-        
-        self.sendBuffer(datagram)

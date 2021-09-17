@@ -40,7 +40,7 @@ class Fisica(object):
         self.rxRemain    = b""
 
         self.HeaderLen   = 10
-        self.EOP         = b'\xAA\x00\xBB\x00'
+        self.EOP         = b'\xff\xaa\xff\xaa'
         self.EOPLen      = len(self.EOP)
 
 
@@ -51,6 +51,9 @@ class Fisica(object):
                                   self.parity,
                                   self.stop,
                                   self.timeout)
+
+        if not self.port.isOpen():
+            self.port.open()
 
 
     def close(self):
@@ -106,4 +109,3 @@ class Fisica(object):
         except :
             print("[ERRO] interfaceFisica, read, decode. buffer : {}".format(rxBufferValid))
             return(b"", 0)
-
