@@ -99,7 +99,7 @@ class Fisica(object):
             """ As vezes acontece erros na decodificacao
             fora do ambiente linux, isso tenta corrigir
             em parte esses erros. Melhorar futuramente."""
-            "muitas vezes um flush no inicio resolve!"
+            # "muitas vezes um flush no inicio resolve!"
             rxBufferDecoded = self.decode(rxBufferValid)
             nRx = len(rxBuffer)
             return(rxBufferDecoded, nRx)

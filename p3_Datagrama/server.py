@@ -19,7 +19,7 @@ from enlaceTx import TX
 from interfaceFisica import Fisica, int_to_bytes, bytes_to_int
 import time
 
-serialName = "COM3"
+serialName = "COM4"
 
 class Server:
     def __init__(self, serialName, server_id):
@@ -33,8 +33,9 @@ class Server:
         self.busy                       = False
        
         # cria porta RX e TX do servidor
-        self.rx = RX(Fisica(serialName))
-        self.tx = TX(Fisica(serialName))
+        fisica = Fisica(serialName)
+        self.rx = RX(fisica)
+        self.tx = TX(fisica)
 
         # dicionário de propriedades (p/ ENVIAR) da transmissão:
         self.props = {
@@ -49,14 +50,6 @@ class Server:
             'CRC_1':            0,
             'CRC_2':            0
         }
-
-    def check_is_busy(self):
-        if self.busy:
-            print(" Server is currently busy. Please, try again later.")
-        else:
-            print(" Server is available")
-
-        return self.busy
 
     def start_server(self):
         # Abre as portas e limpa as memórias
@@ -118,28 +111,31 @@ class Server:
             #* mensagem do tipo 1 (ECHO)
             if header[0] == 1:
                 print(" Client detected -- Valid communication. ")
+                self.clear_props()
 
                 #* Guarda informações pertinentes à comunicação
                 self.client_id                  = header[1]
                 self.file_id                    = header[5]
                 self.total_packages_to_receive  = header[3]
                 
-                # Envia resposta que está pronto, se não estiver ocupado
+                # Envia resposta se está disponível ou não
                 self.props['tipo_mensagem']  = 2 if self.busy==False else 0
                 self.props['id_sensor']      = self.client_id
                 self.props['id_servidor']    = self.id
-                
+                self.props['total_pacotes']  = self.total_packages_to_receive
+
                 message = self.tx.build_header(self.props) + self.tx.build_EOP()
                 self.tx.sendBuffer(message)
 
-                # Inicia Looping para receber todo conteúdo:
-                self.manage_receiving()
+                # Inicia Looping para receber todo conteúdo, se estiver disponível:
+                if self.props['tipo_mensagem'] == 2:
+                    self.manage_receiving()       
 
             #* mensagem do tipo 3 (DADOS)
             elif header[0] == 3:
                 # checa se veio do sensor correto:
                 if header[1] == self.client_id:
-                    # checa último pacote recebido e pacote atual
+                    # checa último pacote recebido h(7) e pacote atual h(4)
                     if header[7] == self.last_package and header[4] == self.last_package + 1:
                         payload = self.extract_payload(header[5])
                         if payload:
@@ -153,8 +149,7 @@ class Server:
                 else:
                     print(" This package came from another client. Please, start communication again")
                     raise Exception
-                
-
+            
         else:
             print(" Wrong server. Please, try again later")
             raise Exception
@@ -199,32 +194,52 @@ class Server:
             while self.last_package < self.total_packages_to_receive:
                 self.await_message()
             
+            #! ENDLOOP:
+            #* Salvar arquivo .PNG recebido
+            full_file = "".join(self.payloads_received)
+            self.save_to_file("output.png", full_file)
+            #<> HARDCODED: Arquivo de saída será um png!
+
+
+            #* Envia mensagem de Transmissão enviada com Sucesso!
+            #TODO: Enviar mensagem de transmissão completa
+        
         except:
             return
 
     def ask_for_next_package(self):
         """ 
-            Envia a mensagem para receber o próximo pacote.
+            Envia a mensagem para RECEBER o próximo pacote.
             Atualiza o último recebido e por qual pacote recomecar em caso de erro.
         """
         self.last_package += 1              # Controla o looping principal
         
         # Props para comunicação
-        self.props['recomecar'] += 1
         self.props['ultimo_recebido'] += 1
-        self.props['tipo_mensagem'] = 4
+        self.props['recomecar'] += 1
+        self.props['pacote_atual'] += 1
+        self.props['tipo_mensagem'] = 4     # Mensagem de 'pacote recebido com sucesso'
 
         message = self.tx.build_header(self.props) + self.tx.build_EOP()
-        
         self.tx.sendBuffer(message)
+
+        print(f" package #{self.last_package} of #{self.total_packages_to_receive} receveid successfully ")
         #! FECHA CICLO DO LOOPING PRINCIPAL
 
     def ask_to_repeat(self):
-        # Definir para Projeto 4
+        """ 
+            Envia a mensagem para REPETIR o último pacote.
+        """
+        self.props['tipo_mensagem'] = 6     # Mensagem de 'erro no último pacote recebido'
+        self.props['recomecar'] = self.last_package + 1
+       
+        message = self.tx.build_header(self.props) + self.tx.build_EOP()
+        self.tx.sendBuffer(message)
+
+        print(f" Failed to receive package #{self.last_package}. Please, send again. ")
         return
         #! FECHA CICLO DO LOOPING PRINCIPAL
-
-
+    #AUX:
     def clear_props(self, fields=[]):
         # Limpa apenas os campos especificados
         if fields:
@@ -238,6 +253,10 @@ class Server:
     def convert_header_to_list(self, header):
         return [bytes_to_int(byte) for byte in header]
     
+    def save_to_file(self, filename, bytes):
+        with open(filename, "wb") as output:
+            output.write(bytes)
+
     def stop_server(self):
         """ Encerra o server """
         self.rx.threadKill()
@@ -246,7 +265,7 @@ class Server:
         self.tx.fisica.close()
 
 if __name__ == "__main__":
-    server = Server(serialName)
+    server = Server(serialName, server_id=1)
     server.start_server()
     server.stop_server()
     print("Comunicação encerrada!")

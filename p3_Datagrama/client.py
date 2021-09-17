@@ -22,11 +22,13 @@ from enlaceTx import TX
 from enlaceRx import RX
 from interfaceFisica import Fisica, bytes_to_int, int_to_bytes
 
-serialName = "COM4"
+serialName = "COM3"
 
 
-#TODO: - Iniciar comunicação com Server
-#TODO: - Gerenciamento da comunicação  
+#>> DONE: - Iniciar comunicação com Server
+#>> - Gerenciamento da comunicação 
+#>> -- Enviar PRÓXIMO pacote ou REENVIAR 
+#TODO: Mensagem final de sucesso
 
 class Client:
     def __init__(self, serialName, file_route, server_id, client_id=0,):
@@ -57,7 +59,7 @@ class Client:
 
         # unidades para guardar comunicação:
         self.payload_size           = 114 
-        self.last_package           = 0
+        self.current_package        = 0
         self.total_packages_to_send = 0
         self.packages_to_send       = self.create_packages_to_transmit(self.route) 
 
@@ -75,32 +77,14 @@ class Client:
 
     def open_communication(self, effort=10):
         """ Tenta estabelecer comunicação com o servidor. """
+        self.send_handshake()
 
-        temporary_props = {
-            'tipo_mensagem':    1,                              #0 - mensagem do tipo HANDSHAKE
-            'id_sensor':        self.id,                        #1 
-            'id_servidor':      self.server_id,                 #2
-            'total_pacotes':    self.total_packages_to_send,    #3
-            'pacote_atual':     0,                              #4
-            'tamanho_conteudo': 22,                             #5 #! id do arquivo
-            'recomecar':        0,                              #6
-            'ultimo_recebido':  0,                              #7
-            'CRC_1':            0,                              #8
-            'CRC_2':            0                               #9
-        }
-
-        # Constrói mensagem do tipo 1 (Handshake)
-        handshake = self.tx.build_header(temporary_props) + self.tx.build_EOP()
-        
-        #* Inicia comunicação e aguarda resposta por 5 segundos
-        self.tx.sendBuffer(handshake)
-        response = self.check_for_handshake()
-
+        # Checa resposta do handshake por 5 segundos
         for i in range (0, effort): 
             print(" awaiting for server to connect...", i)
-            response = self.check_for_handshake()
+            response = self.check_package_type()
 
-            if response == True:
+            if response == "2":
                 # Inicia a transmissão dos pacotes
                 return self.manage_transmition()
 
@@ -109,32 +93,33 @@ class Client:
 
         return self.try_handshake_again()
 
-    def check_for_handshake(self):
-        """ 
-            Analisa se o Buffer contém a mensagem de 
-            resposta ao Handshake (tipo_mensagem == 2). 
-            Retorna `True`, se houver. `False`, caso contrário.
-        """
+    def send_handshake(self):
+        try:
+            temporary_props = {
+                'tipo_mensagem':    1,                              #0 - mensagem do tipo HANDSHAKE
+                'id_sensor':        self.id,                        #1 
+                'id_servidor':      self.server_id,                 #2
+                'total_pacotes':    self.total_packages_to_send,    #3
+                'pacote_atual':     0,                              #4
+                'tamanho_conteudo': 22,                             #5 #! id do arquivo
+                'recomecar':        0,                              #6
+                'ultimo_recebido':  0,                              #7
+                'CRC_1':            0,                              #8
+                'CRC_2':            0                               #9
+            }
 
-        if self.rx.getBufferLen() >= self.rx.fisica.HeaderLen + self.rx.fisica.EOPLen:
-            buffer = self.rx.getBuffer()
-            head = buffer[:self.rx.fisica.HeaderLen]
+            handshake = self.tx.build_header(temporary_props) + self.tx.build_EOP()        
+            self.tx.sendBuffer(handshake)
+            print(" Looking for server to connect to")
 
-            if bytes_to_int(head[0]) == 2:
-                print(" Server is available. Starting to transmit...")
-                return True
-
-            else:
-                return False 
-        else:
-            return False
+        except:
+            print(" Client was not able to send handshake")
 
     def try_handshake_again(self):
         r = input("Servidor inativo. Tentar novamente? S/N")
 
         if r.upper() == "S":
             self.open_communication()
-
         else:
             pass
 
@@ -179,20 +164,69 @@ class Client:
             return False
          
     def manage_transmition(self):
-        # while self.last_package < self.total_packages_to_send:
-            # fica calibrando envio / mensagens de feedback
+        # Envia o pacote 0
+        self.tx.sendBuffer(self.packages_to_send[self.current_package])
+
+        #! LOOPING P/ ENVIAR TODOS OS PACOTES DA TRANSMISSÃO
+        while self.current_package <= self.total_packages_to_send:
+            self.await_for_answer()
+
+        #TODO: CHECAR MENSAGEM DE SUCESSO DE ENVIO DO PACOTE
         return 
 
-    def await_for_next_package(self):
-        return 
+    def await_for_answer(self):
+        while(self.rx.getBufferLen() <= self.rx.fisica.HeaderLen + self.rx.fisica.EOPLen):
+                print(" waiting for the next package...")
+                time.sleep(0.05)
 
+        self.check_package_type()
+
+    def check_package_type(self):
+        buffer = self.rx.getAllBuffer()
+        header = self.convert_header_to_list(buffer[:self.rx.fisica.HeaderLen])
+
+        # checa se mensagem é destinada ao Client correto
+        # checa se mensagem veio do Servidor que está sendo feita a comunicação
+        if header[1] == self.id and header[2] == self.server_id:
+            #* mensagem do tipo HANDSHAKE 
+            if header[0] == 2:
+                print(" Server is available. Starting to transmit...")
+                return "2"
+
+            #* mensagem do tipo SUCCESS (DADOS)
+            elif header[0] == 4:
+                print (" Package received. Sending next one...")
+                self.send_package(message_type=header[0])
+                return "4"
+
+            #* mensagem do tipo ERROR (DADOS)
+            elif header[0] == 6:
+                print(" Failed to deliver last package. Trying again...")
+                self.send_package(message_type=header[0])
+                return "6"
+
+        else:
+            print(" This package was not addressed to this communication. Try again.")
+            raise Exception
+    
+    def send_package(self, message_type):
+        # Envia o próximo pacote, se receber mensagem de sucesso
+        if message_type == "4":
+            self.current_package += 1      #! controla o Looping principal
+        
+        # Repete a última, caso contrário
+        self.tx.sendBuffer(self.packages_to_send[self.current_package])
+       
     # AUX:
     def read_file_as_bytes(self, filename):
         print(f"Lendo arquivo de: {filename}")
         with open(filename,  "rb") as f:
             file = f.read()
         return file
-        
+
+    def convert_header_to_list(self, header):
+        return [bytes_to_int(byte) for byte in header]
+    
     def clear_props(self, fields=[]):
         # Limpa apenas os campos especificados
         if fields:
@@ -211,7 +245,10 @@ class Client:
         self.tx.fisica.close()
 
 if __name__ == "__main__":
-    client = Client(serialName)
+    client = Client(serialName,
+                    server_id=1,
+                    client_id=2,
+                    file_route="p3_Datagrama/apple.png")
     client.start_client()
     client.stop_client()
     print("Comunicação encerrada!")
