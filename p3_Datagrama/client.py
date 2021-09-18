@@ -45,6 +45,7 @@ class Client:
         self.rx = RX(self.fisica)
         self.tx = TX(self.fisica)
 
+        self.forcar_erro = True
         # dicionário de propriedades da transmissão:
         self.props = {
             'tipo_mensagem':    0,
@@ -169,11 +170,10 @@ class Client:
         self.tx.sendBuffer(self.packages_to_send[self.current_package])
 
         #! LOOPING P/ ENVIAR TODOS OS PACOTES DA TRANSMISSÃO
-        while self.current_package < self.total_packages_to_send:
+        while self.current_package <= self.total_packages_to_send:
             self.await_for_answer()
 
-        print(" TODOS PACOTES ENVIADOS COM SUCESSO!")
-        #TODO: CHECAR MENSAGEM DE SUCESSO DE ENVIO DO PACOTE
+        print("TODOS PACOTES ENVIADOS COM SUCESSO!")
         return 
 
         
@@ -194,35 +194,57 @@ class Client:
             if header[1] == self.id and header[2] == self.server_id:
                 #* mensagem do tipo HANDSHAKE 
                 if header[0] == 2:
-                    print(" Server is available. Starting to transmit...")
+                    print("\033[1;32;47m"
+                            + "Server is available. Starting to transmit..."
+                            + "\033[0;0m")
                     return "2"
 
                 #* mensagem do tipo SUCCESS (DADOS)
                 elif header[0] == 4:
-                    print (" Package received. Sending next one...")
-                    self.send_package(message_type=header[0])
+                    print ("\033[1;32m"
+                            + "Package received. Sending next one..."
+                            + "\033[0;0m")
+                    self.send_package(header)
                     return "4"
 
                 #* mensagem do tipo ERROR (DADOS)
                 elif header[0] == 6:
-                    print(" Failed to deliver last package. Trying again...")
-                    self.send_package(message_type=header[0])
+                    print("\033[1;33m" 
+                            + "Failed to deliver last package. Trying again..."
+                            + "\033[0;0m")
+                    
+                    self.send_package(header)
                     return "6"
+                #* mensagem do tipo COMPLETED
+                elif header[0] == 8:
+                    print("\033[1;32;47m"
+                            + " File transfered with success!!"
+                            + "\033[0;0m")
+                    self.current_package += 1
+                    #! QUEBRA O LOOPING PRINCIPAL DA TRANSFERÊNCIA
+                    return "8"
 
             else:
                 print(" This package was not addressed to this communication. Try again.")
     
-    def send_package(self, message_type):
+    def send_package(self, header):
         # Esvazia o buffer antigo antes de receber o próximo
         self.rx.buffer = b""
         self.tx.buffer = b""
 
+        #<> CÓDIGO PARA SIMULAR ERRO NA PARTE 3 DA ENTREGA
+        # if self.current_package == 15 and self.forcar_erro:
+        #     self.current_package = 18
+        #     self.forcar_erro = False
+
         # Envia o próximo pacote, se receber mensagem de sucesso
-        if message_type == 4:
+        if header[0] == 4:
             self.current_package += 1      #! controla o Looping principal
         
+        elif header[0] == 6:
+            self.current_package = header[6]    # reenvia o pacote em 'recomecar'
+        
         if self.current_package != self.total_packages_to_send:
-            # Repete a última, caso contrário
             print(f"--> Enviar o pacote {self.current_package}")
             self.tx.sendBuffer(self.packages_to_send[self.current_package])
         

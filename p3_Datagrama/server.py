@@ -112,7 +112,9 @@ class Server:
             if header[2] == self.id: 
                 #* mensagem do tipo 1 (ECHO)
                 if header[0] == 1:
-                    print(" Client detected -- Valid communication. ")
+                    print("\033[1;32;47m"
+                            +"Client detected -- Valid communication. "
+                            +"\033[0;0m")
                     self.clear_props()
 
                     #* Guarda informações pertinentes à comunicação
@@ -151,6 +153,12 @@ class Server:
                                 self.ask_for_next_package()
                             else:
                                 self.ask_to_repeat()
+                        
+                        else:
+                            print("\033[4;31;40m" 
+                                + f"This package was not expected. Please, send package #{self.current_package}"
+                                + "\033[0;0m")
+                            self.ask_to_repeat()
 
 
                     else:
@@ -174,6 +182,9 @@ class Server:
         if EOP == self.tx.fisica.EOP:
             return True
         else:
+            print("\033[1;31m"
+                +"Payload size is not correct. Please, send package again."
+                +"\033[0;0m")
             return False
                
     def manage_receiving(self):
@@ -188,17 +199,38 @@ class Server:
             while self.current_package < self.total_packages_to_receive:
                 self.await_message()
             
-            #! ENDLOOP:
             #* Salvar arquivo .PNG recebido
-            full_file = "".join(self.payloads_received)
-            self.save_to_file("output.png", full_file)
             #<> HARDCODED: Arquivo de saída será um png!
+            full_file = b""
+            for payload in self.payloads_received:
+                full_file += payload
+            print(f" ARQUIVO RECEBIDO: \n{full_file}")
+            result = self.save_to_file("p3_Datagrama/output.png", full_file)
+            
+            if result:
+                print("\033[1;32;47m" 
+                        + "Salvo com sucesso!"
+                        + "\033[0;0m")
+                # send success transfer
+                self.tx.buffer = b""
+                self.rx.buffer = b""
+                self.props['tipo_mensagem'] = 8     # mensagem de 'Transferência Completa'
+                message = self.tx.build_header(self.props) + self.tx.build_EOP()
+                self.tx.sendBuffer(message)
+                time.sleep(0.5)
 
+            else:
+                # send error. Start from the begining
+                self.tx.buffer = b""
+                self.rx.buffer = b""
+                self.props['tipo_mensagem'] = 6     # mensagem de 'Erro na Transferência --> Recomeçar'
+                self.props['recomecar'] = 0
+                message = self.tx.build_header(self.props) + self.tx.build_EOP()
+                self.tx.sendBuffer(message)
 
-            #* Envia mensagem de Transmissão enviada com Sucesso!
-            #TODO: Enviar mensagem de transmissão completa
         
         except:
+            print("Ocorreu algum erro")
             return
 
     def ask_for_next_package(self):
@@ -206,7 +238,9 @@ class Server:
             Envia a mensagem para RECEBER o próximo pacote.
             Atualiza o último recebido e por qual pacote recomecar em caso de erro.
         """
-        print(f" package #{self.current_package} of #{self.total_packages_to_receive -1} received successfully ")
+        print("\033[1;32m" 
+                + f"Package #{self.current_package} of #{self.total_packages_to_receive -1} received successfully "
+                + "\033[0;0m")
         # Esvazia o buffer antigo antes de receber o próximo
         self.rx.buffer = b""
         self.tx.buffer = b""
@@ -239,7 +273,9 @@ class Server:
         # print(self.props)
         self.tx.sendBuffer(message)
 
-        print(f" Failed to receive package #{self.current_package}. Please, send again. ")
+        print("\033[1;33m"
+                + f"Failed to receive package #{self.current_package}. Please, send again. "
+                + "\033[0;0m")
         return
         #! FECHA CICLO DO LOOPING PRINCIPAL
     #AUX:
@@ -257,8 +293,15 @@ class Server:
         return [byte for byte in header]
     
     def save_to_file(self, filename, bytes):
-        with open(filename, "wb") as output:
-            output.write(bytes)
+        try: 
+            with open(filename, "wb") as output:
+                output.write(bytes)
+                time.sleep(1)
+
+            return True
+
+        except:
+            return False
 
     def stop_server(self):
         """ Encerra o server """
