@@ -11,8 +11,8 @@ Realizado por:
 
 ### P1: Loopback
 ### P2: Client-Server
-### P3: 🔒
-### P4: 🔒
+### P3: Datagrama
+### P4: Protocolo UART
 ### P5: 🔒
 ### P6: 🔒🔒🔒
 ---
@@ -22,3 +22,6 @@ Utilize o comando abaixo para instalar as dependências:
 ```sh 
 pip install -r requirements.txt 
 ```
+
+## Como executar?
+Para os projetos P2 em diante, execute o Client.py e o Server.py em terminais independentes, com o ambiente virtual ativado. 
