@@ -13,16 +13,21 @@
             3.2 - Se Sucesso: Envia próximo pacote
                   Se falha: Reenviar o último pacote
 
+    TESTES:
+        Tanto Server quanto Client têm alguns atributos para se realizar
+        os testes pedidos pelos professores. Abaixo, altere para `True` os 
+        testes que se deseja realizar.
+
 """
 
 from binascii import Error
-import numpy as np
 import time
 from enlaceTx import TX
 from enlaceRx import RX
 from interfaceFisica import Fisica
 import time
 from personalized_exceptions import *
+import datetime
 
 serialName = "COM3"
 
@@ -41,7 +46,7 @@ class Client:
         self.rx = RX(self.fisica)
         self.tx = TX(self.fisica)
 
-        self.forcar_erro = True
+        
         self.handshake_attempt = 1
         self.connected = False
         
@@ -64,6 +69,12 @@ class Client:
         self.current_package        = 0
         self.total_packages_to_send = 0
         self.packages_to_send       = self.create_packages_to_transmit(self.route) 
+
+        # string para registrar os logs
+        self.logs = ""
+
+        #<> Configuração de Testes
+        self.teste_erro_ordem_incorreta = False
 
     def start_client(self):
         # Abre as portas e limpa as memórias
@@ -102,6 +113,10 @@ class Client:
             }
             handshake = self.tx.build_header(temporary_props) + self.tx.build_EOP()        
             self.tx.sendBuffer(handshake)
+
+            #@ log -> S
+            self.add_log('sent', self.props['tipo_mensagem'], len(handshake))
+
             print(f" \n >> HANDSHAKE ({len(handshake)}) -- {handshake}")
 
         except:
@@ -169,6 +184,9 @@ class Client:
         print(f" ENVIA PACOTE #{self.current_package}")
         self.tx.sendBuffer(self.packages_to_send[self.current_package])
 
+        #@ log -> S
+        self.add_log('sent', 3, len(self.packages_to_send[self.current_package]))
+
         #! LOOPING P/ ENVIAR TODOS OS PACOTES DA TRANSMISSÃO
         while self.current_package <= self.total_packages_to_send:
             self.await_for_answer()
@@ -177,8 +195,6 @@ class Client:
         if self.current_package == self.total_packages_to_send:
             print("TODOS PACOTES ENVIADOS COM SUCESSO!")
         return 
-        # except Exception as e:
-        #     print(e)
 
         
     def await_for_answer(self):
@@ -189,13 +205,15 @@ class Client:
             if attempt % 5 == 0 and attempt > 0:
                 print(f"--> Reenviar o pacote {self.current_package}")
                 self.tx.sendBuffer(self.packages_to_send[self.current_package])
+
+                #@ log -> S
+                self.add_log('sent', 3, len(self.packages_to_send[self.current_package]))
             
             time.sleep(1)
             attempt += 1
 
         if attempt == 20:
             self.send_timeout_message()
-            # raise Exception("TimeOut Error") #! BREAK MAIN LOOP
         else: 
             attempt = 0
             return self.check_package_type()
@@ -205,6 +223,9 @@ class Client:
         header = self.convert_header_to_list(buffer[:self.rx.fisica.HeaderLen])
 
         if header:
+            #@ log <- R
+            self.add_log('received', header[0], len(buffer))
+
             # checa se mensagem é destinada ao Client correto
             # checa se mensagem veio do Servidor que está sendo feita a comunicação
             if header[1] == self.id and header[2] == self.server_id:
@@ -256,10 +277,10 @@ class Client:
         self.rx.buffer = b""
         self.tx.buffer = b""
 
-        #<> CÓDIGO PARA SIMULAR ERRO NA PARTE 3 DA ENTREGA
-        # if self.current_package == 15 and self.forcar_erro:
-        #     self.current_package = 18
-        #     self.forcar_erro = False
+        #<> CÓDIGO PARA SIMULAR ERRO NA ORDEM DA TRANSMISSÃO
+        if self.current_package == 15 and self.teste_erro_ordem_incorreta:
+            self.current_package = 17
+            self.forcar_erro = False
 
         # Envia o próximo pacote, se receber mensagem de sucesso
         if header[0] == 4:
@@ -272,6 +293,9 @@ class Client:
             print(f"--> Enviar o pacote {self.current_package}")
             self.tx.sendBuffer(self.packages_to_send[self.current_package])
 
+            #@ log -> S
+            self.add_log('sent', 3, len(self.packages_to_send[self.current_package]))
+            
     def send_timeout_message(self):
         print("\033[4;31m"
                 + "No answers received from client. Closing communication..."
@@ -294,6 +318,9 @@ class Client:
             time.sleep(2)  
             self.tx.sendBuffer(message)  
 
+            #@ log -> S
+            self.add_log('sent', 5, len(message))
+            
         raise TimeOutError()
 
     # AUX:
@@ -325,7 +352,13 @@ class Client:
         else:
             for prop in self.props:
                 self.props[prop] = 0
-        
+
+    def add_log(self, received_or_sent, message_type, total_bytes_size):
+        if received_or_sent == 'received':
+            self.logs +=f"{datetime.datetime.now()} | received | {message_type} | {total_bytes_size}\n"
+        elif received_or_sent == 'sent':
+            self.logs +=f"{datetime.datetime.now()} | sent     | {message_type} | {total_bytes_size} | {self.current_package} | {self.total_packages_to_send}\n" 
+    
     def stop_client(self):
         """ Encerra o client """
         self.rx.threadKill()
@@ -345,5 +378,10 @@ if __name__ == "__main__":
     except Exception as e:
         print("Ocorreu alguma exceção ＞﹏＜\n-->", e.message)
         client.stop_client()
+
+    finally:
+        print(client.logs)
+        with open('p4_Protocolo-UART/Client-test.txt', 'w') as output:
+            output.write(client.logs)
 
     print("Comunicação encerrada!")

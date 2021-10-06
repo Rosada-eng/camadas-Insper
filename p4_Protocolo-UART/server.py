@@ -12,6 +12,12 @@
         5- Server recebe #@ ÚLTIMO PACOTE: 
             5.1 - Reagrupar todos pacotes e salvar em um único arquivo
             5.2 - Retorna mensagem de COMUNICAÇÃO COM SUCESSO!
+    TESTES:
+        Tanto Server quanto Client têm alguns atributos para se realizar
+        os testes pedidos pelos professores. Abaixo, altere para `True` os 
+        testes que se deseja realizar.
+
+
 """
 
 from enlaceRx import RX
@@ -19,7 +25,7 @@ from enlaceTx import TX
 from interfaceFisica import Fisica
 from personalized_exceptions import *
 import time
-
+import datetime
 
 serialName = "COM4"
 
@@ -38,10 +44,7 @@ class Server:
         self.fisica = Fisica(serialName)
         self.rx = RX(self.fisica)
         self.tx = TX(self.fisica)
-
-        # configuração de variáveis de TESTE:
-        self.teste_ausencia_resposta = True
-
+        
         # dicionário de propriedades (p/ ENVIAR) da transmissão:
         self.props = {
             'tipo_mensagem':    0,
@@ -55,6 +58,14 @@ class Server:
             'CRC_1':            0,
             'CRC_2':            0
         }
+
+        #<> configuração de variáveis de TESTE:
+        self.teste_ausencia_resposta    = False
+        self.atrasa_handshake           = False
+        self.interromper_envio_10_seg   = False
+
+        # String para registrar todos os logs
+        self.logs = ''
 
     def start_server(self):
         # Abre as portas e limpa as memórias
@@ -74,9 +85,9 @@ class Server:
         """ 
         Coloca o server em espera, aguardando recebimento da mensagem
         """
-        #>> Timer 1 -- 2 seg:
+        # Timer 1 -- 2 seg:
             # Se passar dos 2 segundos, reenvia última mensagem pedindo o próximo pacote
-        #>>: Timer2 -- 20 seg:
+        #: Timer2 -- 20 seg:
             # Se chegar a 20 seg e ainda não tiver recebido a mensagem, encerra comunicação
         attempt = 1
         while(self.rx.getBufferLen() < self.rx.fisica.HeaderLen + self.rx.fisica.EOPLen) and attempt < 20:
@@ -132,6 +143,8 @@ class Server:
         buffer = self.rx.getAllBuffer()
         header = self.convert_header_to_list(buffer[:self.rx.fisica.HeaderLen])
         if buffer:
+            #@ log <- R
+            self.add_log('received', header[0], len(buffer))
             # checa se mensagem é destinada ao Servidor correto
             if header[2] == self.id: 
                 #* mensagem do tipo 1 (ECHO)
@@ -152,13 +165,20 @@ class Server:
                     self.props['id_servidor']    = self.id
                     self.props['total_pacotes']  = self.total_packages_to_receive
 
-                    message = self.tx.build_header(self.props) + self.tx.build_EOP()
-                    self.tx.sendBuffer(message)
+                    if self.atrasa_handshake == True:
+                        time.sleep(21)
+                    
+                    else:
+                        message = self.tx.build_header(self.props) + self.tx.build_EOP()
+                        self.tx.sendBuffer(message)
 
-                    self.busy = True
-                    # Inicia Looping para receber todo conteúdo, se estiver disponível:
-                    if self.props['tipo_mensagem'] == 2:
-                        self.manage_receiving()       
+                        #@ log -> S
+                        self.add_log('sent', self.props['tipo_mensagem'], len(message))
+                        
+                        self.busy = True
+                        # Inicia Looping para receber todo conteúdo, se estiver disponível:
+                        if self.props['tipo_mensagem'] == 2:
+                            self.manage_receiving()       
 
                 
                 #* mensagem do tipo 3 (DADOS)
@@ -258,6 +278,10 @@ class Server:
             self.props['tipo_mensagem'] = 8     # mensagem de 'Transferência Completa'
             message = self.tx.build_header(self.props) + self.tx.build_EOP()
             self.tx.sendBuffer(message)
+            
+            #@ log -> S
+            self.add_log('sent', self.props['tipo_mensagem'], len(message))
+
             self.busy = False
             time.sleep(0.5)
 
@@ -269,6 +293,9 @@ class Server:
             self.props['recomecar'] = 0
             message = self.tx.build_header(self.props) + self.tx.build_EOP()
             self.tx.sendBuffer(message)
+
+            #@ log -> S
+            self.add_log('sent', self.props['tipo_mensagem'], len(message))
 
     def ask_for_next_package(self):
         """ 
@@ -288,6 +315,13 @@ class Server:
             time.sleep(20)
             self.teste_ausencia_resposta = False
             self.check_package_type()
+
+        #<> TESTE PARA AUSENCIA TEMPORÁRIA DE RESPOSTA (12 SEG):
+        elif self.interromper_envio_10_seg and self.current_package == 5:
+            time.sleep(12)
+            self.interromper_envio_10_seg = False
+            self.check_package_type()
+
         else:
             self.current_package += 1              # Controla o looping principal
 
@@ -300,6 +334,9 @@ class Server:
             message = self.tx.build_header(self.props) + self.tx.build_EOP()
             # print(self.props)
             self.tx.sendBuffer(message)
+
+            #@ log -> S
+            self.add_log('sent', self.props['tipo_mensagem'], len(message))
             #! FECHA CICLO DO LOOPING PRINCIPAL
 
     def ask_to_repeat(self):
@@ -316,6 +353,9 @@ class Server:
         message = self.tx.build_header(self.props) + self.tx.build_EOP()
         # print(self.props)
         self.tx.sendBuffer(message)
+
+        #@ log -> S
+        self.add_log('sent', self.props['tipo_mensagem'], len(message))
 
         #* Remove print, para diferenciar FALHA de 'pacote ainda não chegou'
         # print("\033[1;33m"
@@ -346,6 +386,9 @@ class Server:
             time.sleep(2)  
             self.tx.sendBuffer(message)  
 
+            #@ log -> S
+            self.add_log('sent', self.props['tipo_mensagem'], len(message))
+
         raise TimeOutError()
 
     #AUX:
@@ -373,6 +416,12 @@ class Server:
         except:
             return False
 
+    def add_log(self, received_or_sent, message_type, total_bytes_size):
+        if received_or_sent == 'received':
+            self.logs +=f"{datetime.datetime.now()} | received | {message_type} | {total_bytes_size}\n"
+        elif received_or_sent == 'sent':
+            self.logs +=f"{datetime.datetime.now()} | sent     | {message_type} | {total_bytes_size} | {self.current_package} | {self.total_packages_to_receive}\n"
+
     def stop_server(self):
         """ Encerra o server """
         self.rx.threadKill()
@@ -388,4 +437,9 @@ if __name__ == "__main__":
     except Exception as e:
         print("Ocorreu alguma exceção ＞﹏＜\n-->", e.message)
         server.stop_server()
+
+    finally:
+        print(server.logs)
+        with open('p4_Protocolo-UART/Server-test.txt', 'w') as output:
+            output.write(server.logs)
     print("Comunicação encerrada!")

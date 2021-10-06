@@ -14,7 +14,7 @@ class SaveFileError(Exception):
     message = "Não foi possível salvar o arquivo recebido no destino final."
 
 class SendHandshakeError(Exception):
-    message = "Não foi enviar o Handshake"
+    message = "Não foi possível enviar o Handshake"
 
 class ConvertPackagesError(Exception):
     message = "Não foi converter o arquivo em pacotes de envio."
