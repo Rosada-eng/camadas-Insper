@@ -13,8 +13,9 @@ Realizado por:
 ### P2: Client-Server
 ### P3: Datagrama
 ### P4: Protocolo UART
-### P5: 🔒
-### P6: 🔒🔒🔒
+### P5: CRC 🔒
+### P6: Serialização UART por porta digital do Arduíno (due_sw_uart)
+### P7: Transmissão DTMF (Dual Tone Multi Frequency)
 ---
 
 ## Como instalar?
