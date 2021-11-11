@@ -66,10 +66,17 @@ xp = np.linspace(0.0, len(yAudioFiltrado) / 44100, len(yAudioFiltrado))
 yp = 1 * np.sin(14000 * xp * 2 * np.pi)
 
 # $ y_modulado = (1 + yAudio)*yp
-y_modulado = [(1 + yAudioNormalizado[i]) * yp[i] for i in range(len(yAudio))]
+y_modulado = [(0.2 + yAudioFiltrado[i]) * yp[i] for i in range(len(yAudio))]
 plt.figure(figsize=(10, 6))
+plt.subplot(2, 1, 1)
+plt.plot(yAudioFiltrado)
+plt.title("Sinal de áudio filtrado")
+
+plt.subplot(2, 1, 2)
 plt.plot(y_modulado)
-plt.title("Sinal de áudio modulado (domínio do tempo)")
+plt.title("Sinal de áudio modulado (domínio do tempo)\n (0.2 + m)*Cp")
+
+plt.subplots_adjust(hspace=0.5)
 plt.show()
 
 # * Ouvir sinal modulado
